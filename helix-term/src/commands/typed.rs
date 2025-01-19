@@ -13,6 +13,7 @@ use helix_stdx::path::home_dir;
 use helix_view::document::{read_to_string, DEFAULT_LANGUAGE_NAME};
 use helix_view::editor::{CloseError, ConfigEvent};
 use serde_json::Value;
+use std::borrow::Cow;
 use ui::completers::{self, Completer};
 
 #[derive(Clone)]
@@ -111,7 +112,27 @@ fn open(cx: &mut compositor::Context, args: &[Cow<str>], event: PromptEvent) -> 
 
     ensure!(!args.is_empty(), "wrong argument count");
     for arg in args {
-        let (path, pos) = args::parse_file(arg);
+        // TODO: Refactor this into a separate function to make it less hacky and more idiomatic.
+        //
+        // Current behavior:
+        // This is a quick hack to inject a dynamic value into `arg`.
+        // - Used by the `:open from_clipboard` or `:e from_clipboard` commands.
+        // - If `arg` starts with "from_clipboard", the clipboard is checked for a value.
+        use clipboard::{ClipboardContext, ClipboardProvider};
+        let mut ctx: ClipboardContext = ClipboardProvider::new().unwrap();
+        let clipboard_value = ctx.get_contents().unwrap_or_else(|_| String::new());
+
+        let arg = if arg == "from_clipboard" {
+            if !clipboard_value.is_empty() {
+                Cow::Owned(clipboard_value)
+            } else {
+                arg.clone()
+            }
+        } else {
+            arg.clone()
+        };
+
+        let (path, pos) = args::parse_file(&arg);
         let path = helix_stdx::path::expand_tilde(path);
         // If the path is a directory, open a file picker on that directory and update the status
         // message
