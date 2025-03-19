@@ -407,6 +407,13 @@ pub fn symbol_picker(cx: &mut Context) {
                 ui::PickerColumn::new("name", |item: &SymbolInformationItem, _| {
                     item.symbol.name.as_str().into()
                 }),
+                ui::PickerColumn::new("container", |item: &SymbolInformationItem, _| {
+                    item.symbol
+                        .container_name
+                        .as_deref()
+                        .unwrap_or_default()
+                        .into()
+                }),
             ];
 
             let picker = Picker::new(
@@ -508,6 +515,13 @@ pub fn workspace_symbol_picker(cx: &mut Context) {
             item.symbol.name.as_str().into()
         })
         .without_filtering(),
+        ui::PickerColumn::new("container", |item: &SymbolInformationItem, _| {
+            item.symbol
+                .container_name
+                .as_deref()
+                .unwrap_or_default()
+                .into()
+        }),
         ui::PickerColumn::new("path", |item: &SymbolInformationItem, _| {
             if let Some(path) = item.location.uri.as_path() {
                 path::get_relative_path(path)
@@ -758,7 +772,7 @@ pub fn code_action(cx: &mut Context) {
                 match &action.lsp_item {
                     lsp::CodeActionOrCommand::Command(command) => {
                         log::debug!("code action command: {:?}", command);
-                        execute_lsp_command(editor, action.language_server_id, command.clone());
+                        editor.execute_lsp_command(command.clone(), action.language_server_id);
                     }
                     lsp::CodeActionOrCommand::CodeAction(code_action) => {
                         log::debug!("code action: {:?}", code_action);
@@ -787,7 +801,7 @@ pub fn code_action(cx: &mut Context) {
                         // if code action provides both edit and command first the edit
                         // should be applied and then the command
                         if let Some(command) = &code_action.command {
-                            execute_lsp_command(editor, action.language_server_id, command.clone());
+                            editor.execute_lsp_command(command.clone(), action.language_server_id);
                         }
                     }
                 }
@@ -800,33 +814,6 @@ pub fn code_action(cx: &mut Context) {
         };
 
         Ok(Callback::EditorCompositor(Box::new(call)))
-    });
-}
-
-pub fn execute_lsp_command(
-    editor: &mut Editor,
-    language_server_id: LanguageServerId,
-    cmd: lsp::Command,
-) {
-    // the command is executed on the server and communicated back
-    // to the client asynchronously using workspace edits
-    let future = match editor
-        .language_server_by_id(language_server_id)
-        .and_then(|language_server| language_server.command(cmd))
-    {
-        Some(future) => future,
-        None => {
-            editor.set_error("Language server does not support executing commands");
-            return;
-        }
-    };
-
-    tokio::spawn(async move {
-        let res = future.await;
-
-        if let Err(e) = res {
-            log::error!("execute LSP command: {}", e);
-        }
     });
 }
 
@@ -1062,11 +1049,7 @@ pub fn hover(cx: &mut Context) {
                 .text_document_hover(doc.identifier(), pos, None)
                 .unwrap();
 
-            async move {
-                let json = request.await?;
-                let response = serde_json::from_value::<Option<lsp::Hover>>(json)?;
-                anyhow::Ok((server_name, response))
-            }
+            async move { anyhow::Ok((server_name, request.await?)) }
         })
         .collect();
 
