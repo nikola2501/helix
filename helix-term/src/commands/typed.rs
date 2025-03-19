@@ -106,6 +106,25 @@ fn open(cx: &mut compositor::Context, args: Args, event: PromptEvent) -> anyhow:
     }
 
     for arg in args {
+
+        // TODO: Refactor this into a separate function to make it less hacky and more idiomatic.
+        // This is a quick hack to inject a dynamic value into `arg`.
+        // - Used by the `:open from_clipboard` or `:e from_clipboard` commands.
+        // - If `arg` starts with "from_clipboard", the clipboard is checked for a value.
+        // - If the clipboard has a value, it is used as the path to open.
+        use clipboard::{ClipboardContext, ClipboardProvider};
+        let mut ctx: ClipboardContext = ClipboardProvider::new().unwrap();
+        let clipboard_value = ctx.get_contents().unwrap_or_else(|_| String::new());
+
+        let arg = if arg == "from_clipboard" {
+            if !clipboard_value.is_empty() {
+                Cow::Owned(clipboard_value)
+            } else {
+                arg.clone()
+            }
+        } else {
+            arg.clone()
+        };
         let (path, pos) = crate::args::parse_file(&arg);
         let path = helix_stdx::path::expand_tilde(path);
         // If the path is a directory, open a file picker on that directory and update the status
